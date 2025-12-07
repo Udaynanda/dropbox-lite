@@ -1,79 +1,65 @@
-# Dropbox Lite - Distributed File Synchronization System
+# Distributed File Synchronization System
 
-A high-performance distributed file synchronization system written in C++20, implementing core Dropbox/Google Drive functionality with content-defined chunking, delta sync, and deduplication.
+A high-performance file synchronization system written in C++20, implementing content-defined chunking, delta sync, and deduplication. Think Dropbox, but built from scratch to understand how distributed storage systems work.
 
-[![C++](https://img.shields.io/badge/C++-20-blue.svg)](https://isocpp.org/)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+## Overview
 
-## 🎯 Project Overview
+This project implements the core algorithms used by systems like Dropbox, Google Drive, and rsync:
+- **FastCDC chunking** for efficient file splitting
+- **Delta synchronization** to minimize bandwidth usage
+- **Content-addressable storage** for deduplication
+- **gRPC** for client-server communication
 
-This project demonstrates production-grade distributed systems engineering by implementing a complete file synchronization system from scratch. It showcases algorithms used by real-world systems like Dropbox, Git, and rsync.
+## Performance
 
-**Key Achievement**: Benchmarked on Apple M3 Pro achieving **270 MB/s chunking throughput**, **76% deduplication**, and **50-75% bandwidth reduction** for typical file edits.
+Benchmarked on Apple M3 Pro:
+- Chunking throughput: **280 MB/s**
+- SHA256 hashing: **1,923 MB/s**
+- Deduplication: **76% storage savings** for similar files
+- Delta sync: **50-75% bandwidth reduction** for typical edits
 
-## ✨ Features
+See [BENCHMARKS.md](BENCHMARKS.md) for detailed measurements.
 
-### Core Functionality
-- **Content-Defined Chunking (FastCDC)**: Variable-size chunks using Rabin-Karp rolling hash
-- **Delta Synchronization**: Only transfer changed chunks (rsync-like efficiency)
-- **Deduplication**: Content-addressable storage eliminates duplicate chunks
-- **Conflict Resolution**: Automatic and manual strategies (last-write-wins, keep-both)
-- **Real-time File Monitoring**: Platform-specific watchers (inotify/FSEvents)
-- **Multi-threaded Transfers**: Concurrent uploads with thread pool
+## Features
 
-### Technical Implementation
-- **gRPC Communication**: Bidirectional streaming with Protocol Buffers
-- **SHA256 Hashing**: Cryptographic integrity verification
-- **SQLite Metadata**: Efficient local state tracking with indexed queries
-- **Compression**: zlib compression for bandwidth optimization
-- **Rate Limiting**: Token bucket algorithm for bandwidth control
+- **Content-Defined Chunking**: Uses FastCDC algorithm with Rabin-Karp rolling hash
+- **Delta Sync**: Only transfers changed chunks, not entire files
+- **Deduplication**: Identical chunks stored once, referenced by multiple files
+- **Real-time Monitoring**: Platform-specific file watchers (inotify on Linux, FSEvents on macOS)
+- **Conflict Resolution**: Handles concurrent edits with configurable strategies
+- **Multi-threaded**: Parallel chunk uploads with thread pool
 
-## 📊 Performance (Benchmarked on M3 Pro)
-
-| Metric | Result |
-|--------|--------|
-| Chunking Throughput | 270 MB/s |
-| SHA256 Hashing | 1,923 MB/s |
-| Deduplication Savings | 76% (similar files) |
-| Delta Sync Reduction | 50-75% (typical edits) |
-
-See [BENCHMARKS.md](BENCHMARKS.md) for detailed performance analysis.
-
-## 🏗️ Architecture
+## Architecture
 
 ```
-┌─────────────┐         gRPC          ┌─────────────┐
-│   Client    │◄─────────────────────►│   Server    │
-│             │                        │             │
-│ FileWatcher │                        │  Storage    │
-│ SyncEngine  │                        │  Manager    │
-│ DeltaEngine │                        │             │
-│ MetadataDB  │                        │ MetadataDB  │
-└─────────────┘                        └─────────────┘
+Client                          Server
+  │                               │
+  ├─ FileWatcher ────────────────┤
+  ├─ SyncEngine                  ├─ SyncService
+  ├─ DeltaEngine                 ├─ StorageManager
+  └─ MetadataDB                  └─ MetadataDB
+       │                               │
+       └──────── gRPC/HTTP2 ──────────┘
 ```
 
-### Key Components
+**Client Components:**
+- `FileWatcher`: Monitors filesystem changes
+- `SyncEngine`: Orchestrates synchronization
+- `DeltaEngine`: Computes file deltas
+- `MetadataDB`: SQLite database for local state
 
-**Client Side:**
-- `FileWatcher`: OS-specific file monitoring (inotify/FSEvents)
-- `SyncEngine`: Orchestrates synchronization logic
-- `DeltaEngine`: Computes file deltas for efficient transfers
-- `UploadManager`: Multi-threaded upload queue
-- `MetadataDB`: SQLite database for local file metadata
-
-**Server Side:**
+**Server Components:**
 - `SyncService`: gRPC service implementation
 - `StorageManager`: Content-addressable chunk storage
-- `ConflictResolver`: Handles file conflicts
+- `MetadataDB`: Tracks file versions and chunks
 
 **Common:**
-- `Chunker`: FastCDC content-defined chunking
-- `Hash`: SHA256 and rolling hash implementations
-- `Compression`: zlib compression/decompression
-- `ThreadPool`: High-performance work queue
-- `Metrics`: Performance monitoring
+- `Chunker`: FastCDC implementation
+- `Hash`: SHA256 and rolling hash
+- `ThreadPool`: Concurrent operations
+- `Compression`: zlib compression
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -99,9 +85,9 @@ make -j$(nproc)
 
 ```bash
 cd build/benchmarks
-./bench_chunking    # Chunking performance
-./bench_dedup       # Deduplication effectiveness
-./bench_delta_sync  # Delta sync bandwidth reduction
+./bench_chunking    # Test chunking performance
+./bench_dedup       # Test deduplication
+./bench_delta_sync  # Test delta sync efficiency
 ```
 
 ### Run Server & Client
@@ -114,193 +100,105 @@ cd build/benchmarks
 ./build/dropbox_client_app ./sync_folder localhost:50051 client1
 ```
 
-## 🔬 Technical Deep Dive
+## How It Works
 
-### Content-Defined Chunking (FastCDC)
+### Content-Defined Chunking
 
-Uses Rabin-Karp rolling hash with adaptive masking for optimal chunk distribution:
+Traditional fixed-size chunking breaks when you insert data at the beginning of a file - all subsequent chunks change. FastCDC uses a rolling hash to find chunk boundaries based on content, not position.
 
 ```cpp
-// Adaptive masking based on chunk size
-if (chunk_size < normalized_size) {
-    is_boundary = (hash & (kMask >> 1)) == 0;  // More aggressive
-} else {
-    is_boundary = (hash & kMask) == 0;         // Normal
-}
+// Simplified chunking logic
+for each byte in file:
+    rolling_hash.update(byte)
+    if rolling_hash matches pattern:
+        create_chunk()
 ```
 
-**Why FastCDC?**
-- Better chunk size distribution than traditional CDC
-- Resilient to insertions/deletions (chunks don't shift)
-- ~2x faster than traditional content-defined chunking
-
-**Configuration:**
-- Min chunk: 4 KB
-- Avg chunk: 64 KB
-- Max chunk: 1 MB
+This means inserting a paragraph at the start of a document only changes 1-2 chunks, not the entire file.
 
 ### Delta Synchronization
 
-1. Client chunks local file → generates SHA256 hashes
+1. Client chunks local file and computes SHA256 hashes
 2. Client sends hashes to server
-3. Server identifies missing chunks
-4. Client uploads only new chunks
+3. Server identifies which chunks it already has
+4. Client uploads only the missing chunks
 5. Server reconstructs file from chunks
 
-**Bandwidth Savings**: 50-75% for typical document edits
+For a 10 MB file with 5% changes, this transfers ~2.6 MB instead of 10 MB.
 
 ### Deduplication
 
-Content-addressable storage using SHA256:
+Chunks are stored using their SHA256 hash as the filename:
 ```
 chunks/
-  ab/abcdef123456...  (SHA256 hash as filename)
+  ab/abcdef123456...
   cd/cdef789012...
 ```
 
-Multiple files can reference the same chunk, achieving **76% storage savings** for similar files.
+If two files have identical chunks, the chunk is stored once and referenced twice. This saves ~76% storage for similar files (like document versions).
 
-### Conflict Resolution
+## Technical Details
 
-**Detection:**
-```cpp
-bool hasConflict = 
-    local.hash != remote.hash &&
-    local.version > 0 &&
-    remote.version > 0;
-```
+**Algorithms:**
+- FastCDC for content-defined chunking
+- Rabin-Karp rolling hash (O(1) updates)
+- SHA256 for integrity verification
+- Token bucket for rate limiting
 
-**Strategies:**
-1. **Last-Write-Wins**: Compare timestamps
-2. **Keep Both**: Create conflict copy
-3. **Manual**: User decides
+**Concurrency:**
+- Thread pool for parallel operations
+- Lock-free metrics collection
+- RAII-based transaction management
 
-## 📁 Project Structure
+**Network:**
+- gRPC with bidirectional streaming
+- Protocol Buffers for serialization
+- HTTP/2 multiplexing
+
+**Storage:**
+- SQLite for metadata (indexed queries)
+- Content-addressable chunk storage
+- Atomic file operations
+
+## Project Structure
 
 ```
 dropbox-lite/
 ├── proto/              # Protocol buffer definitions
-├── include/            # Public headers
-│   ├── common/         # Hash, chunker, compression, logger
-│   ├── core/           # Metadata DB, delta engine, conflict resolver
-│   ├── client/         # File watcher, sync engine, upload manager
-│   └── server/         # Storage manager, sync service
-├── src/                # Implementation files
-├── benchmarks/         # Performance benchmarks
+├── include/            # Header files
+│   ├── common/         # Hash, chunker, compression
+│   ├── core/           # Metadata, delta engine
+│   ├── client/         # File watcher, sync engine
+│   └── server/         # Storage, sync service
+├── src/                # Implementation
+├── benchmarks/         # Performance tests
 ├── tests/              # Unit tests
 └── CMakeLists.txt
 ```
 
-## 🎓 What This Demonstrates
+## Limitations
 
-### Distributed Systems
-- Eventual consistency model
-- Conflict detection and resolution
-- Version vectors for state management
-- Heartbeat-based connection monitoring
+This is a proof-of-concept demonstrating distributed systems algorithms. Production use would require:
 
-### Algorithms & Data Structures
-- FastCDC content-defined chunking
-- Rabin-Karp rolling hash (O(1) updates)
-- Content-addressable storage
-- Token bucket rate limiting
+- **Security**: TLS encryption, authentication, authorization
+- **Testing**: Comprehensive integration and chaos testing
+- **Monitoring**: Metrics, logging, distributed tracing
+- **Scalability**: Horizontal scaling, load balancing
+- **Reliability**: Retry logic, circuit breakers, health checks
 
-### Systems Programming
-- Modern C++20 (RAII, smart pointers, move semantics)
-- Platform-specific APIs (inotify/FSEvents)
-- Multi-threading and concurrency
-- Zero-copy I/O where possible
+## Why I Built This
 
-### Performance Engineering
-- Benchmarking and profiling
-- Lock-free data structures
-- Indexed database queries
-- Streaming I/O (no full file in memory)
+I wanted to understand how systems like Dropbox work under the hood. This project taught me:
+- How content-defined chunking enables efficient delta sync
+- Trade-offs between consistency and availability in distributed systems
+- Performance optimization techniques (profiling, benchmarking)
+- Systems programming in modern C++
 
-## 🔐 Security Considerations
+## License
 
-**Current Implementation:**
-- ✅ SHA256 integrity verification
-- ✅ Chunk-level verification
-- ❌ No encryption at rest
-- ❌ No encryption in transit (insecure gRPC)
-- ❌ No authentication/authorization
+MIT License - see [LICENSE](LICENSE) file.
 
-**Production Requirements:**
-- Add TLS/SSL for gRPC
-- Implement OAuth2/JWT authentication
-- Add AES-256 encryption at rest
-- Implement rate limiting per user
-- Add audit logging
+## Acknowledgments
 
-## 🧪 Testing
-
-```bash
-# Run unit tests (requires GoogleTest)
-cd build
-ctest --output-on-failure
-
-# Run benchmarks
-cd benchmarks
-./bench_chunking
-./bench_dedup
-./bench_delta_sync
-```
-
-## 📈 Performance Characteristics
-
-### Time Complexity
-| Operation | Complexity | Notes |
-|-----------|-----------|-------|
-| Chunk file | O(n) | n = file size |
-| Hash chunk | O(n) | n = chunk size |
-| Find chunk | O(1) | Hash table lookup |
-| Sync query | O(log m) | m = file count, indexed |
-
-### Space Complexity
-| Component | Complexity | Notes |
-|-----------|-----------|-------|
-| Metadata | O(n) | n = file count |
-| Chunk index | O(m) | m = unique chunks |
-| Event queue | O(k) | k = pending events |
-
-## 🚧 Future Enhancements
-
-- [ ] End-to-end encryption
-- [ ] Selective sync (ignore patterns)
-- [ ] Bandwidth throttling UI
-- [ ] File history/snapshots
-- [ ] Shared folders
-- [ ] Web interface
-- [ ] Mobile clients
-
-## 📝 Resume-Ready Description
-
-> **Distributed File Synchronization System (C++)**
-> 
-> Engineered a distributed file sync system implementing core Dropbox functionality with FastCDC content-defined chunking, delta synchronization, and deduplication. Benchmarked on M3 Pro achieving 270 MB/s chunking throughput, 76% deduplication for similar files, and 50-75% bandwidth reduction for typical edits.
-> 
-> **Technical Stack**: C++20, gRPC, Protocol Buffers, SQLite, OpenSSL, zlib
-> 
-> **Key Achievements**:
-> - Implemented FastCDC algorithm from research papers with Rabin-Karp rolling hash
-> - Built content-addressable storage with cross-file deduplication
-> - Designed eventual consistency model with conflict resolution
-> - Optimized for performance with multi-threading and zero-copy I/O
-> - Comprehensive benchmarking and performance analysis
-
-## 📄 License
-
-MIT License - feel free to use this in your portfolio!
-
-## 🤝 Contributing
-
-This is a portfolio project demonstrating distributed systems expertise. Suggestions and improvements are welcome!
-
-## 📧 Contact
-
-Built to demonstrate systems engineering skills for infrastructure and distributed systems roles.
-
----
-
-**Note**: This is a proof-of-concept demonstrating distributed systems algorithms. Production deployment would require security hardening, comprehensive testing, and operational tooling.
+- FastCDC algorithm from "FastCDC: a Fast and Efficient Content-Defined Chunking Approach for Data Deduplication"
+- Inspired by Dropbox, rsync, and Git's delta compression
