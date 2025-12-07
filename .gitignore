@@ -1,0 +1,26 @@
+# Build artifacts
+build/
+*.o
+*.a
+*.so
+*.dylib
+
+# Runtime files
+*.db
+*.log
+storage/
+sync_folder/
+client*/
+/tmp/
+bench_*.dat
+
+# IDE
+.DS_Store
+.vscode/
+.idea/
+cmake-build-*/
+
+# Editor
+*.swp
+*.swo
+*~

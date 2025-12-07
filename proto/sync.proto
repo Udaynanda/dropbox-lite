@@ -1,0 +1,129 @@
+syntax = "proto3";
+
+package dropboxlite;
+
+// File metadata
+message FileMetadata {
+  string path = 1;
+  int64 size = 2;
+  int64 modified_time = 3;
+  string hash = 4;  // SHA256 hash
+  int32 version = 5;
+  bool is_directory = 6;
+  bool deleted = 7;
+}
+
+// Chunk information for delta sync
+message Chunk {
+  int32 index = 1;
+  int64 offset = 2;
+  int32 size = 3;
+  string hash = 4;  // SHA256 of chunk
+  bytes data = 5;
+}
+
+// File change notification
+message FileChange {
+  enum ChangeType {
+    CREATED = 0;
+    MODIFIED = 1;
+    DELETED = 2;
+    RENAMED = 3;
+  }
+  
+  string path = 1;
+  ChangeType type = 2;
+  string old_path = 3;  // For renames
+  FileMetadata metadata = 4;
+}
+
+// Sync request from client
+message SyncRequest {
+  string client_id = 1;
+  repeated FileMetadata local_files = 2;
+  int64 last_sync_time = 3;
+}
+
+// Sync response from server
+message SyncResponse {
+  repeated FileChange changes = 1;
+  int64 server_time = 2;
+  repeated string conflicts = 3;
+}
+
+// Upload chunk request
+message UploadChunkRequest {
+  string client_id = 1;
+  string file_path = 2;
+  Chunk chunk = 3;
+  int32 total_chunks = 4;
+}
+
+// Upload response
+message UploadChunkResponse {
+  bool success = 1;
+  string message = 2;
+  int32 chunks_received = 3;
+}
+
+// Download request
+message DownloadRequest {
+  string client_id = 1;
+  string file_path = 2;
+  repeated string chunk_hashes = 3;  // Hashes client already has
+}
+
+// Download response (streamed)
+message DownloadResponse {
+  Chunk chunk = 1;
+  bool is_last = 2;
+}
+
+// Conflict resolution request
+message ConflictResolutionRequest {
+  string client_id = 1;
+  string file_path = 2;
+  enum Strategy {
+    KEEP_LOCAL = 0;
+    KEEP_REMOTE = 1;
+    KEEP_BOTH = 2;
+  }
+  Strategy strategy = 3;
+}
+
+// Conflict resolution response
+message ConflictResolutionResponse {
+  bool success = 1;
+  string resolved_path = 2;
+}
+
+// Heartbeat for connection monitoring
+message HeartbeatRequest {
+  string client_id = 1;
+  int64 timestamp = 2;
+}
+
+message HeartbeatResponse {
+  int64 server_timestamp = 1;
+}
+
+// Main sync service
+service SyncService {
+  // Initial sync - get all changes since last sync
+  rpc Sync(SyncRequest) returns (SyncResponse);
+  
+  // Upload file in chunks (client streaming)
+  rpc UploadFile(stream UploadChunkRequest) returns (UploadChunkResponse);
+  
+  // Download file in chunks (server streaming)
+  rpc DownloadFile(DownloadRequest) returns (stream DownloadResponse);
+  
+  // Resolve conflicts
+  rpc ResolveConflict(ConflictResolutionRequest) returns (ConflictResolutionResponse);
+  
+  // Bidirectional streaming for real-time sync
+  rpc StreamSync(stream FileChange) returns (stream FileChange);
+  
+  // Heartbeat
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+}
