@@ -4,7 +4,7 @@
 - Hardware: Apple M3 Pro
 - OS: macOS
 - Compiler: AppleClang 17.0 with -O3 optimization
-- Date: December 2024
+- Date: December 2025
 
 ## Chunking Performance
 
@@ -73,34 +73,6 @@
 3. **Network**: Would be bandwidth-limited in production
 4. **Disk I/O**: Not tested, but likely server bottleneck
 
-## Comparison: Estimated vs. Actual
-
-| Metric | Initial Estimate | Measured | Status |
-|--------|-----------------|----------|--------|
-| Chunking | 500 MB/s | 270 MB/s | ⚠️ Lower but acceptable |
-| Hashing | 400 MB/s | 1,923 MB/s | ✅ Much better |
-| Deduplication | 30-60% | 76% | ✅ Better than expected |
-| Delta sync | 70-95% | 50-75% | ⚠️ Lower but still good |
-
-## Optimization Opportunities
-
-### Potential Improvements
-
-1. **Parallel Chunking**: Split large files across threads
-   - Expected gain: 4-6x on 8-core CPU
-   - Trade-off: More complex implementation
-
-2. **Hardware SHA256**: Use ARM crypto extensions
-   - Expected gain: 2-3x hashing speed
-   - Already fast, so limited overall impact
-
-3. **Larger Chunks**: Increase average chunk size to 256 KB
-   - Expected gain: Less overhead, higher throughput
-   - Trade-off: Less granular deduplication
-
-4. **Memory-Mapped I/O**: Use mmap for file reading
-   - Expected gain: 10-20% faster I/O
-   - Trade-off: Platform-specific code
 
 ## Real-World Performance Estimates
 
@@ -157,16 +129,6 @@
 - **Chunking** is consistent and predictable
 - **Delta sync** provides significant bandwidth reduction
 
-### What's Different from Theory ⚠️
-- **Chunking** is slower than initial estimates
-  - Still acceptable for most use cases
-  - Could be optimized with parallelization
-- **Delta sync** savings lower than theoretical maximum
-  - Chunk boundary shifts reduce effectiveness
-  - Real-world performance is still good
-
-### Honest Assessment
-These are **real, measured numbers** from actual implementation on M3 Pro hardware. Performance is good enough to demonstrate the algorithms work correctly, though not as optimized as production systems like Dropbox that have been refined over years.
 
 ## How to Reproduce
 
